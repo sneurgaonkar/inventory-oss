@@ -27,7 +27,7 @@ With `PUBLIC_SANITY_PROJECT_ID` empty, the site builds against the sample produc
 
 ## Ideas that are especially welcome
 
-- Better sample screenshots / empty states
+- Better empty states
 - Extra currency / locale presets
 - Accessibility improvements
 - Docs for alternative hosts (Vercel, Netlify, etc.)

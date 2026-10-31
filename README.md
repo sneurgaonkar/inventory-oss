@@ -4,8 +4,6 @@ An open-source **moving sale / garage sale** website.
 
 Built with [Astro](https://astro.build) (static site), [Sanity](https://www.sanity.io) (CMS), and [Cloudflare Workers](https://workers.cloudflare.com) (hosting + interest / view counters). Everything runs on free tiers.
 
-> **Screenshot:** after you deploy, drop homepage and item-page shots into [`docs/screenshots/`](docs/screenshots/) and link them here.
-
 ## Features
 
 - Category filters with small line icons
