@@ -1,0 +1,553 @@
+---
+import Layout from '../layouts/Layout.astro';
+import ProductCard from '../components/ProductCard.astro';
+import { getProducts, getCategories, getSiteSettings, PAGE_SIZE, PRICE_TIERS, SORTS } from '../lib/sanity';
+
+const [allProducts, allCategories, settings] = await Promise.all([getProducts(), getCategories(), getSiteSettings()]);
+// On-hold (status=reserved) and sold items get their own sections below the pager and stay out of
+// filters, sort and counts. (Items with hidden=true are already excluded by the query.)
+// Given-away items count as sold.
+const isGone = (s: string) => s === 'sold' || s === 'given';
+const products = allProducts.filter((p) => !isGone(p.status) && p.status !== 'reserved');
+const onHold = allProducts.filter((p) => p.status === 'reserved');
+const sold = allProducts.filter((p) => isGone(p.status));
+// Only offer categories that have something to show.
+const categories = allCategories.filter((c) => products.some((p) => p.category?.slug === c.slug));
+const pageCount = Math.max(1, Math.ceil(products.length / PAGE_SIZE));
+
+// Small line icons for known categories (drawn for this site; unknown categories get none).
+const ICONS: Record<string, string> = {
+  furniture: '<path d="M5 11V8.5A2.5 2.5 0 0 1 7.5 6h9A2.5 2.5 0 0 1 19 8.5V11"/><path d="M3.5 12.5a1.5 1.5 0 0 1 3 0V14h11v-1.5a1.5 1.5 0 0 1 3 0V17a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1Z"/><path d="M6 18v1.5M18 18v1.5"/>',
+  mattresses: '<path d="M3 18V7"/><path d="M3 14h18v4"/><path d="M21 14v-2a3 3 0 0 0-3-3h-7v5"/><circle cx="7" cy="11" r="1.6"/>',
+  books: '<path d="M5 5.5A1.5 1.5 0 0 1 6.5 4H19v13H6.5A1.5 1.5 0 0 0 5 18.5Z"/><path d="M5 18.5A1.5 1.5 0 0 0 6.5 20H19v-3"/><path d="M9 8h6"/>',
+  electronics: '<rect x="3.5" y="5" width="17" height="11" rx="1.5"/><path d="M9 20h6M12 16v4"/>',
+  'home-essentials': '<path d="M4 11.5 12 5l8 6.5"/><path d="M6 10v9.5h12V10"/><path d="M10 19.5V15h4v4.5"/>',
+  tickets: '<path d="M3.5 7.5A1.5 1.5 0 0 1 5 6h14a1.5 1.5 0 0 1 1.5 1.5V10a2 2 0 0 0 0 4v2.5A1.5 1.5 0 0 1 19 18H5a1.5 1.5 0 0 1-1.5-1.5V14a2 2 0 0 0 0-4Z"/><path d="M14.5 6v2M14.5 11v2M14.5 16v2"/>',
+  kitchen: '<path d="M6 3v7a2 2 0 0 0 4 0V3M8 10v11M16 21V3c2.2 1.5 3 4 3 7h-3"/>',
+  appliances: '<rect x="5" y="3" width="14" height="18" rx="2"/><circle cx="12" cy="13" r="4"/><path d="M8 6.5h1"/>',
+};
+const icon = (slug: string) =>
+  ICONS[slug] ? `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[slug]}</svg>` : '';
+const chevron = '<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>';
+const plural = (n: number) => `${n} object${n === 1 ? '' : 's'}`;
+const tierOf = (n: number) => PRICE_TIERS.find((t) => n >= t.min && n < t.max)?.id;
+const tiers = PRICE_TIERS.map((t) => ({ ...t, n: products.filter((p) => tierOf(p.askingPrice) === t.id).length }));
+const priceTiersJson = JSON.stringify(PRICE_TIERS.map((t) => ({ id: t.id, min: t.min, max: t.max === Infinity ? null : t.max })));
+---
+<Layout heading={settings.headline} headingIsH1 note={settings.pickupNote}>
+  {/* Header tallies: same numbers as the grid / On hold / Sold sections (the script keeps them in sync). */}
+  <p slot="stats" class="stock-stats" aria-label="Item counts">
+    <a href="#grid" class:list={["stat stat-avail", { "is-zero": products.length === 0 }]} data-stat="available"><span class="stat-dot" aria-hidden="true"></span><span class="stat-n" id="stat-available">{products.length}</span> available</a>
+    <span class="stat-sep" aria-hidden="true">·</span>
+    <a href="#on-hold" class:list={["stat stat-hold", { "is-zero": onHold.length === 0 }]} data-stat="hold"><span class="stat-dot" aria-hidden="true"></span><span class="stat-n" id="stat-hold">{onHold.length}</span> on hold</a>
+    <span class="stat-sep" aria-hidden="true">·</span>
+    <a href="#sold" class:list={["stat stat-sold", { "is-zero": sold.length === 0 }]} data-stat="sold"><span class="stat-dot" aria-hidden="true"></span><span class="stat-n" id="stat-sold">{sold.length}</span> sold</a>
+  </p>
+  <div slot="filters" class="toolbar" id="toolbar">
+    <div class="dd" data-dd="cat">
+      <button type="button" class="pill dd-trigger" id="dd-cat-btn" aria-haspopup="true" aria-expanded="false" aria-controls="dd-cat">
+        <span>Category</span><span class="dd-count" data-count></span><Fragment set:html={chevron} />
+      </button>
+      <div class="dd-panel" id="dd-cat" role="group" aria-labelledby="dd-cat-title" hidden>
+        <div class="dd-head">
+          <span class="dd-title" id="dd-cat-title">Category</span>
+          <button type="button" class="dd-clear" data-clear>Clear</button>
+        </div>
+        <ul class="dd-list">
+          {categories.map((c) => (
+            <li>
+              <label class="dd-opt">
+                <input type="checkbox" name="cat" value={c.slug} />
+                <span class="box" aria-hidden="true"></span>
+                <Fragment set:html={icon(c.slug)} />
+                <span class="lbl">{c.title}</span>
+                <span class="n" data-n>{products.filter((p) => p.category?.slug === c.slug).length}</span>
+              </label>
+            </li>
+          ))}
+        </ul>
+        <button type="button" class="btn primary dd-done" data-done>Show results</button>
+      </div>
+    </div>
+
+    <div class="dd" data-dd="price">
+      <button type="button" class="pill dd-trigger" id="dd-price-btn" aria-haspopup="true" aria-expanded="false" aria-controls="dd-price">
+        <span>Price</span><span class="dd-count" data-count></span><Fragment set:html={chevron} />
+      </button>
+      <div class="dd-panel" id="dd-price" role="group" aria-labelledby="dd-price-title" hidden>
+        <div class="dd-head">
+          <span class="dd-title" id="dd-price-title">Price</span>
+          <button type="button" class="dd-clear" data-clear>Clear</button>
+        </div>
+        <ul class="dd-list">
+          {tiers.map((t) => (
+            <li>
+              <label class="dd-opt">
+                <input type="checkbox" name="price" value={t.id} />
+                <span class="box" aria-hidden="true"></span>
+                <span class="lbl">{t.label}</span>
+                <span class="n" data-n>{t.n}</span>
+              </label>
+            </li>
+          ))}
+        </ul>
+        <button type="button" class="btn primary dd-done" data-done>Show results</button>
+      </div>
+    </div>
+
+    <button type="button" class="clear-all" id="clear-all" hidden>Clear filters</button>
+  </div>
+
+  <div class="grid-meta">
+    <span class="result-line">
+      <span class="result-count" id="result-count" aria-live="polite">{plural(products.length)}</span>
+      <span class="page-label" id="page-label">{pageCount > 1 ? `· Page 1 of ${pageCount}` : ''}</span>
+    </span>
+    <div class="dd dd-sort" data-dd="sort">
+      <button type="button" class="sort-trigger dd-trigger" id="dd-sort-btn" aria-haspopup="true" aria-expanded="false" aria-controls="dd-sort">
+        <span class="sort-k">Sort by</span> <span class="sort-v" id="sort-value">{SORTS[0].label}</span><Fragment set:html={chevron} />
+      </button>
+      <div class="dd-panel dd-right" id="dd-sort" role="radiogroup" aria-labelledby="dd-sort-title" hidden>
+        <div class="dd-head"><span class="dd-title" id="dd-sort-title">Sort by</span></div>
+        <ul class="dd-list">
+          {SORTS.map((s, i) => (
+            <li>
+              <label class="dd-opt">
+                <input type="radio" name="sort" value={s.id} checked={i === 0} />
+                <span class="dot" aria-hidden="true"></span>
+                <span class="lbl">{s.label}</span>
+              </label>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  {/* All cards are rendered; the script filters, sorts and pages them. */}
+  <section class="grid-gallery" id="grid" data-page-size={PAGE_SIZE} data-tiers={priceTiersJson} aria-label="Items for sale">
+    {products.map((p, i) => <ProductCard product={p} hidden={i >= PAGE_SIZE} eager={i < 4} />)}
+    <p class="empty" id="empty" hidden>Nothing matches these filters. <button type="button" class="linkish" data-clear-all>Clear filters</button></p>
+  </section>
+
+  <nav class="pagination pill-row" id="pagination" aria-label="Pages">
+    {pageCount > 1 && Array.from({ length: pageCount }, (_, i) => (
+      <a href={`/?page=${i + 1}`} class="pill" aria-current={i === 0 ? 'page' : undefined}>{i + 1}</a>
+    ))}
+  </nav>
+
+  {/* On-hold items: someone has dibs; listed in full, not filtered, sorted or counted. */}
+  <section class="hold-section" id="on-hold" aria-labelledby="hold-title" hidden={onHold.length === 0}>
+    <div class="grid-meta hold-meta">
+      <h2 class="hold-title" id="hold-title">On hold</h2>
+      <span class="hold-count" id="hold-count">{plural(onHold.length)}</span>
+    </div>
+    <div class="grid-gallery hold-gallery" id="hold-grid">
+      {onHold.map((p) => <ProductCard product={p} />)}
+    </div>
+  </section>
+
+  {/* Sold items: always listed in full, not filtered, sorted or counted with the items for sale. */}
+  <section class="sold-section" id="sold" aria-labelledby="sold-title" hidden={sold.length === 0}>
+    <div class="grid-meta sold-meta">
+      <h2 class="sold-title" id="sold-title">Sold</h2>
+      <span class="sold-count" id="sold-count">{plural(sold.length)}</span>
+    </div>
+    <div class="grid-gallery sold-gallery" id="sold-grid">
+      {sold.map((p) => <ProductCard product={p} />)}
+    </div>
+  </section>
+  <div class="dd-backdrop" id="dd-backdrop" hidden></div>
+</Layout>
+
+<style>
+  /* header tallies */
+  .stock-stats { margin: 10px 0 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: 13.5px; line-height: 1.3; color: var(--fg-2); }
+  .stat { display: inline-flex; align-items: center; gap: 6px; color: inherit; text-decoration: none; border-bottom: 1px solid transparent; transition: color 0.2s ease, border-color 0.2s ease; }
+  .stat:hover { color: var(--fg); border-bottom-color: currentColor; }
+  .stat-n { font-weight: 600; color: var(--fg); font-variant-numeric: tabular-nums; }
+  .stat-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+  .stat-avail .stat-dot { background: var(--ok); }
+  .stat-hold .stat-dot { background: var(--warn); }
+  .stat-sold .stat-dot { background: var(--danger); }
+  .stat.is-zero { pointer-events: none; color: var(--muted); }
+  .stat.is-zero .stat-n { color: var(--muted); }
+  .stat-sep { color: var(--line); }
+  @media (max-width: 768px) { .stock-stats { margin-top: 10px; font-size: 13px; gap: 4px 8px; } }
+  .hold-section, .sold-section { scroll-margin-top: 210px; }
+  @media (max-width: 768px) { .hold-section, .sold-section { scroll-margin-top: 0; } }
+
+  /* toolbar + dropdowns */
+  .toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  @media (max-width: 768px) { .toolbar { padding: 0 var(--pad-x); } }
+  .dd { position: relative; }
+  .dd-trigger :global(.chev) { width: 14px; height: 14px; transition: transform 0.2s ease; }
+  .dd-trigger[aria-expanded='true'] :global(.chev) { transform: rotate(180deg); }
+  .pill.dd-trigger { gap: 5px; padding-right: 12px; }
+  .pill.dd-trigger.is-active { border-color: var(--fg); color: var(--fg); background: var(--card); }
+  .dd-count:empty { display: none; }
+  .dd-count { font-variant-numeric: tabular-nums; }
+  .dd-panel {
+    position: absolute; top: calc(100% + 8px); left: 0; z-index: 120; min-width: 260px;
+    background: var(--card); border-radius: 12px; padding: 8px;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06), 0 16px 48px rgba(0, 0, 0, 0.14);
+    transform-origin: top left; animation: dd-in 0.18s var(--ease);
+  }
+  .dd-panel.dd-right { left: auto; right: 0; transform-origin: top right; min-width: 220px; }
+  .dd-head { display: flex; justify-content: space-between; align-items: center; padding: 8px 10px 10px; border-bottom: 1px solid var(--line); margin-bottom: 4px; }
+  .dd-title { font-size: 11px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
+  .dd-clear { border: 0; background: none; padding: 2px 4px; font-size: 12.5px; font-weight: 500; color: var(--fg-2); cursor: pointer; text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--line); }
+  .dd-clear:hover { color: var(--fg); text-decoration-color: currentColor; }
+  .dd-clear:disabled { opacity: 0.4; cursor: default; text-decoration: none; }
+  .dd-list { list-style: none; margin: 0; padding: 0; }
+  .dd-opt {
+    display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 8px; cursor: pointer;
+    font-size: 14px; font-weight: 500; letter-spacing: -0.01em; color: var(--fg); line-height: 1.3;
+    transition: background-color 0.15s ease;
+  }
+  .dd-opt:hover { background: var(--bg); }
+  .dd-opt :global(svg) { width: 16px; height: 16px; color: var(--fg-2); flex-shrink: 0; }
+  .dd-opt input { position: absolute; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
+  .dd-opt .lbl { flex: 1; }
+  .dd-opt .n { font-size: 12px; font-weight: 500; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .dd-opt.is-empty { color: var(--muted); }
+  .box, .dot { width: 18px; height: 18px; flex-shrink: 0; border: 1.5px solid #b5b5b5; background: #fff; transition: all 0.15s ease; position: relative; }
+  .box { border-radius: 5px; }
+  .dot { border-radius: 50%; }
+  .dd-opt input:checked + .box { background: var(--fg); border-color: var(--fg); }
+  .dd-opt input:checked + .box::after { content: ''; position: absolute; left: 5px; top: 1.5px; width: 4px; height: 9px; border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg); }
+  .dd-opt input:checked + .dot { border-color: var(--fg); }
+  .dd-opt input:checked + .dot::after { content: ''; position: absolute; inset: 3.5px; border-radius: 50%; background: var(--fg); }
+  .dd-opt:has(input:focus-visible) { outline: 2px solid var(--fg); outline-offset: -2px; }
+  .dd-done { display: none; }
+  .clear-all { border: 0; background: none; font-size: 13px; font-weight: 500; color: var(--fg-2); cursor: pointer; padding: 8px 6px; text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--line); }
+  .clear-all:hover { color: var(--fg); text-decoration-color: currentColor; }
+  .dd-backdrop { display: none; }
+  @keyframes dd-in { from { opacity: 0; transform: translateY(-4px) scale(0.98); } }
+
+  /* meta bar with sort (as in the reference: "SORT BY VIBES") */
+  .grid-meta {
+    display: flex; justify-content: space-between; align-items: center; gap: 10px;
+    padding: 10px var(--pad-x) 8px; border-bottom: 1px solid var(--line);
+    font-size: 12px; line-height: 1; text-transform: uppercase;
+  }
+  .result-line { display: inline-flex; gap: 8px; align-items: center; }
+  .result-count { font-weight: 600; color: var(--fg-2); letter-spacing: 0.06em; }
+  .page-label { color: var(--muted); letter-spacing: 0.06em; }
+  .sort-trigger {
+    display: inline-flex; align-items: center; gap: 5px; border: 0; background: none; cursor: pointer;
+    padding: 6px 0; font: 400 12px/1 var(--font-body); text-transform: uppercase; color: var(--muted);
+  }
+  .sort-k { letter-spacing: 0.04em; }
+  .sort-v { font-weight: 600; color: var(--fg-2); letter-spacing: 0.02em; }
+  .sort-trigger:hover .sort-v { color: var(--fg); }
+  .dd-sort .dd-panel { text-transform: none; }
+
+  /* mobile: dropdowns become bottom sheets */
+  @media (max-width: 640px) {
+    .dd-panel, .dd-panel.dd-right {
+      position: fixed; left: 0; right: 0; bottom: 0; top: auto; z-index: 160; min-width: 0; width: 100%;
+      border-radius: 18px 18px 0 0; padding: 10px 12px calc(16px + env(safe-area-inset-bottom));
+      max-height: 75vh; overflow-y: auto; animation: sheet-in 0.28s var(--ease);
+    }
+    .dd-panel::before { content: ''; display: block; width: 36px; height: 4px; border-radius: 4px; background: var(--line); margin: 2px auto 8px; }
+    .dd-opt { padding: 13px 10px; font-size: 15px; }
+    .dd-done { display: flex; width: 100%; margin-top: 8px; }
+    .dd-backdrop { display: block; position: fixed; inset: 0; z-index: 150; background: rgba(20, 20, 20, 0.4); animation: fade 0.2s ease; }
+    .dd-backdrop[hidden] { display: none; }
+  }
+  @keyframes sheet-in { from { transform: translateY(100%); } }
+  @keyframes fade { from { opacity: 0; } }
+
+  /* grid */
+  .grid-gallery {
+    display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 24px;
+    padding: 32px var(--pad-x); align-items: start; max-width: 1760px; margin: 0 auto; scroll-margin-top: 170px;
+  }
+  @media (max-width: 1200px) { .grid-gallery { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; } }
+  @media (max-width: 1024px) { .grid-gallery { padding: 24px var(--pad-x); } }
+  @media (max-width: 768px) { .grid-gallery { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; padding: 20px var(--pad-x); scroll-margin-top: 0; } }
+  @media (max-width: 480px) { .grid-gallery { gap: 12px; padding: 16px var(--pad-x); } }
+  .empty { grid-column: 1 / -1; text-align: center; color: var(--muted); padding: 64px 0; margin: 0; }
+  .linkish { border: 0; background: none; font: inherit; color: var(--fg); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+  .pagination { justify-content: center; padding: 8px var(--pad-x) 16px; flex-wrap: wrap; }
+  .pagination:empty { display: none; }
+  .pagination :global(.pill) { min-width: 40px; }
+  .pagination :global(.pill.disabled) { opacity: 0.35; pointer-events: none; }
+  .pagination :global(.ellipsis) { color: var(--muted); padding: 0 4px; }
+
+  /* on-hold section */
+  .hold-section { margin-top: 32px; border-top: 1px solid var(--line); }
+  .hold-section[hidden] { display: none; }
+  .hold-title { margin: 0; font: 600 12px/1 var(--font-body); letter-spacing: 0.06em; color: var(--fg); }
+  .hold-count { color: var(--muted); letter-spacing: 0.06em; }
+
+  /* sold section */
+  .sold-section { margin-top: 32px; border-top: 1px solid var(--line); }
+  .sold-section[hidden] { display: none; }
+  .sold-title { margin: 0; font: 600 12px/1 var(--font-body); letter-spacing: 0.06em; color: var(--fg-2); }
+  .sold-count { color: var(--muted); letter-spacing: 0.06em; }
+  @media (max-width: 768px) { .pagination { overflow: visible; } }
+</style>
+
+<script>
+  import { fetchLive, patchCard } from '../lib/live-client';
+
+  type Tier = { id: string; min: number; max: number | null };
+  const grid = document.getElementById('grid')!;
+  const holdSection = document.getElementById('on-hold')!;
+  const holdGrid = document.getElementById('hold-grid')!;
+  const holdCountEl = document.getElementById('hold-count')!;
+  const soldSection = document.getElementById('sold')!;
+  const soldGrid = document.getElementById('sold-grid')!;
+  const soldCountEl = document.getElementById('sold-count')!;
+  const pager = document.getElementById('pagination')!;
+  const countEl = document.getElementById('result-count')!;
+  const pageEl = document.getElementById('page-label')!;
+  const emptyEl = document.getElementById('empty')!;
+  const sortValueEl = document.getElementById('sort-value')!;
+  const clearAllBtn = document.getElementById('clear-all')!;
+  const backdrop = document.getElementById('dd-backdrop')!;
+  const statAvail = document.getElementById('stat-available')!;
+  const statHold = document.getElementById('stat-hold')!;
+  const statSold = document.getElementById('stat-sold')!;
+  const statLinks = [...document.querySelectorAll<HTMLAnchorElement>('.stock-stats .stat')];
+  const cards = [...document.querySelectorAll<HTMLElement>('#grid .card, #hold-grid .card, #sold-grid .card')];
+  const PAGE_SIZE = Number(grid.dataset.pageSize) || 20;
+  const TIERS: Tier[] = JSON.parse(grid.dataset.tiers || '[]');
+  const SORT_IDS = ['popular', 'price-desc', 'price-asc'];
+  const SORT_LABEL: Record<string, string> = {};
+  document.querySelectorAll<HTMLInputElement>('input[name="sort"]').forEach((i) => (SORT_LABEL[i.value] = i.closest('label')!.querySelector('.lbl')!.textContent!));
+  const initialOrder = new Map(cards.map((c, i) => [c, i])); // build order = featured, available, newest
+  const isSold = (c: HTMLElement) => c.dataset.status === 'sold' || c.dataset.status === 'given';
+  const isHeld = (c: HTMLElement) => c.dataset.status === 'reserved';
+  let views: Record<string, number> = {};
+
+  const state = { cats: new Set<string>(), prices: new Set<string>(), sort: 'popular', page: 1 };
+
+  const inputs = (name: string) => [...document.querySelectorAll<HTMLInputElement>(`input[name="${name}"]`)];
+  const tierOf = (price: number) => TIERS.find((t) => price >= t.min && (t.max === null || price < t.max))?.id ?? '';
+  const priceOf = (c: HTMLElement) => Number(c.dataset.price ?? 0);
+  const list = (v: string | null) => new Set((v ?? '').split(',').map((s) => s.trim()).filter(Boolean));
+
+  // ---- URL state: ?cat=a,b&price=free,under-1k&sort=price-asc&page=2 (old ?cat=books and #books still work)
+  const readUrl = () => {
+    const q = new URLSearchParams(location.search);
+    const hash = decodeURIComponent(location.hash.slice(1));
+    state.cats = list(q.get('cat') ?? (hash && !hash.includes('=') ? hash : ''));
+    state.prices = list(q.get('price'));
+    const s = q.get('sort') ?? 'popular';
+    state.sort = SORT_IDS.includes(s) ? s : 'popular';
+    state.page = Math.max(1, Number(q.get('page')) || 1);
+  };
+  const query = (page = state.page) => {
+    const q = new URLSearchParams();
+    if (state.cats.size) q.set('cat', [...state.cats].join(','));
+    if (state.prices.size) q.set('price', [...state.prices].join(','));
+    if (state.sort !== 'popular') q.set('sort', state.sort);
+    if (page > 1) q.set('page', String(page));
+    return q.toString().replace(/%2C/g, ',');
+  };
+  const writeUrl = () => { const qs = query(); history.replaceState(null, '', qs ? `${location.pathname}?${qs}` : location.pathname); };
+  const href = (page: number) => { const qs = query(page); return qs ? `/?${qs}` : '/'; };
+
+  // ---- sorting
+  const unavailable = (c: HTMLElement) => (c.dataset.status && c.dataset.status !== 'available' ? 1 : 0);
+  const created = (c: HTMLElement) => Date.parse(c.dataset.created || '') || 0;
+  const compare = (a: HTMLElement, b: HTMLElement) => {
+    const ua = unavailable(a) - unavailable(b);
+    if (ua) return ua; // available first in every sort
+    if (state.sort === 'price-desc' && priceOf(a) !== priceOf(b)) return priceOf(b) - priceOf(a);
+    if (state.sort === 'price-asc' && priceOf(a) !== priceOf(b)) return priceOf(a) - priceOf(b);
+    if (state.sort === 'popular') {
+      // Featured items are pinned to the top; views order everything else.
+      const f = (b.dataset.featured ? 1 : 0) - (a.dataset.featured ? 1 : 0);
+      if (f) return f;
+      const v = (views[b.dataset.slug!] ?? 0) - (views[a.dataset.slug!] ?? 0);
+      if (v) return v;
+      const n = created(b) - created(a);
+      if (n) return n;
+    }
+    return initialOrder.get(a)! - initialOrder.get(b)!;
+  };
+
+  // ---- pager
+  const renderPager = (pageCount: number) => {
+    pager.innerHTML = '';
+    if (pageCount <= 1) return;
+    const add = (html: string) => pager.insertAdjacentHTML('beforeend', html);
+    const p = state.page;
+    add(p > 1 ? `<a class="pill" href="${href(p - 1)}" data-page="${p - 1}" aria-label="Previous page">‹</a>` : `<span class="pill disabled" aria-hidden="true">‹</span>`);
+    let lastShown = 0;
+    for (let n = 1; n <= pageCount; n++) {
+      if (n !== 1 && n !== pageCount && Math.abs(n - p) > 1) continue;
+      if (n - lastShown > 1) add('<span class="ellipsis">…</span>');
+      add(`<a href="${href(n)}" data-page="${n}" class="pill${n === p ? ' active' : ''}"${n === p ? ' aria-current="page"' : ''} aria-label="Page ${n}">${n}</a>`);
+      lastShown = n;
+    }
+    add(p < pageCount ? `<a class="pill" href="${href(p + 1)}" data-page="${p + 1}" aria-label="Next page">›</a>` : `<span class="pill disabled" aria-hidden="true">›</span>`);
+  };
+
+  // ---- main render
+  const apply = () => {
+    // Status can change live (patchCard), so on-hold and sold cards are re-routed on every render.
+    const byNewest = (a: HTMLElement, b: HTMLElement) => (Date.parse(b.dataset.created || '') || 0) - (Date.parse(a.dataset.created || '') || 0);
+    const visible = cards.filter((c) => !c.dataset.hidden && !isSold(c) && !isHeld(c));
+    const holdCards = cards.filter((c) => !c.dataset.hidden && isHeld(c)).sort(byNewest);
+    const soldCards = cards.filter((c) => !c.dataset.hidden && isSold(c))
+      .sort((a, b) => (Date.parse(b.dataset.created || '') || 0) - (Date.parse(a.dataset.created || '') || 0));
+    // Drop selections that no longer match anything (e.g. a category whose items were all hidden live).
+    const liveCats = new Set(visible.map((c) => c.dataset.category!));
+    state.cats.forEach((c) => { if (!liveCats.has(c)) state.cats.delete(c); });
+    state.prices.forEach((p) => { if (!TIERS.some((t) => t.id === p)) state.prices.delete(p); });
+
+    const catOk = (c: HTMLElement) => !state.cats.size || state.cats.has(c.dataset.category!);
+    const priceOk = (c: HTMLElement) => !state.prices.size || state.prices.has(tierOf(priceOf(c)));
+    const matching = visible.filter((c) => catOk(c) && priceOk(c)).sort(compare);
+
+    // Faceted counts: each option counts items matching the *other* filter.
+    inputs('cat').forEach((i) => {
+      const n = visible.filter((c) => c.dataset.category === i.value && priceOk(c)).length;
+      i.checked = state.cats.has(i.value);
+      const li = i.closest('li')!; li.hidden = !liveCats.has(i.value);
+      li.querySelector('[data-n]')!.textContent = String(n);
+      i.closest('label')!.classList.toggle('is-empty', n === 0);
+    });
+    inputs('price').forEach((i) => {
+      const n = visible.filter((c) => tierOf(priceOf(c)) === i.value && catOk(c)).length;
+      i.checked = state.prices.has(i.value);
+      i.closest('li')!.querySelector('[data-n]')!.textContent = String(n);
+      i.closest('label')!.classList.toggle('is-empty', n === 0);
+    });
+    inputs('sort').forEach((i) => (i.checked = i.value === state.sort));
+    sortValueEl.textContent = SORT_LABEL[state.sort];
+    for (const [name, set] of [['cat', state.cats], ['price', state.prices]] as const) {
+      const dd = document.querySelector<HTMLElement>(`.dd[data-dd="${name}"]`)!;
+      const trig = dd.querySelector<HTMLElement>('.dd-trigger')!;
+      dd.querySelector('[data-count]')!.textContent = set.size ? ` (${set.size})` : '';
+      trig.classList.toggle('is-active', set.size > 0);
+      trig.setAttribute('aria-label', `${name === 'cat' ? 'Category' : 'Price'}${set.size ? `, ${set.size} selected` : ''}`);
+      dd.querySelector<HTMLButtonElement>('[data-clear]')!.disabled = !set.size;
+    }
+    clearAllBtn.hidden = !state.cats.size && !state.prices.size;
+
+    // Order the DOM (keeps tab order = visual order), then page.
+    const ordered = [...matching, ...cards.filter((c) => !matching.includes(c) && !soldCards.includes(c) && !holdCards.includes(c))];
+    ordered.forEach((c) => grid.insertBefore(c, emptyEl));
+    holdCards.forEach((c) => holdGrid.appendChild(c));
+    soldCards.forEach((c) => soldGrid.appendChild(c));
+    const pageCount = Math.max(1, Math.ceil(matching.length / PAGE_SIZE));
+    state.page = Math.min(state.page, pageCount);
+    const start = (state.page - 1) * PAGE_SIZE;
+    const onPage = new Set([...matching.slice(start, start + PAGE_SIZE), ...holdCards, ...soldCards]);
+    cards.forEach((c) => (c.hidden = !onPage.has(c)));
+    holdSection.hidden = holdCards.length === 0;
+    holdCountEl.textContent = `${holdCards.length} object${holdCards.length === 1 ? '' : 's'}`;
+    soldSection.hidden = soldCards.length === 0;
+    soldCountEl.textContent = `${soldCards.length} object${soldCards.length === 1 ? '' : 's'}`;
+    statAvail.textContent = String(visible.length);
+    statHold.textContent = String(holdCards.length);
+    statSold.textContent = String(soldCards.length);
+    statLinks.forEach((a) => a.classList.toggle('is-zero', a.querySelector('.stat-n')!.textContent === '0'));
+    renderPager(pageCount);
+    countEl.textContent = `${matching.length} object${matching.length === 1 ? '' : 's'}`;
+    pageEl.textContent = pageCount > 1 ? `· Page ${state.page} of ${pageCount}` : '';
+    emptyEl.hidden = matching.length > 0;
+    writeUrl();
+  };
+
+  // ---- dropdown behaviour
+  const dds = [...document.querySelectorAll<HTMLElement>('.dd')];
+  let openDd: HTMLElement | null = null;
+  const isSheet = () => matchMedia('(max-width: 640px)').matches;
+  const close = (focusTrigger = false) => {
+    if (!openDd) return;
+    const trig = openDd.querySelector<HTMLElement>('.dd-trigger')!;
+    openDd.querySelector<HTMLElement>('.dd-panel')!.hidden = true;
+    trig.setAttribute('aria-expanded', 'false');
+    backdrop.hidden = true;
+    document.body.style.overflow = '';
+    if (focusTrigger) trig.focus();
+    openDd = null;
+  };
+  const open = (dd: HTMLElement) => {
+    if (openDd === dd) return close();
+    close();
+    openDd = dd;
+    dd.querySelector<HTMLElement>('.dd-panel')!.hidden = false;
+    dd.querySelector('.dd-trigger')!.setAttribute('aria-expanded', 'true');
+    if (isSheet()) { backdrop.hidden = false; document.body.style.overflow = 'hidden'; }
+    const first = dd.querySelector<HTMLInputElement>('li:not([hidden]) input:checked') ?? dd.querySelector<HTMLInputElement>('li:not([hidden]) input');
+    first?.focus({ preventScroll: true });
+  };
+  dds.forEach((dd) => {
+    dd.querySelector('.dd-trigger')!.addEventListener('click', () => open(dd));
+    dd.querySelector('[data-clear]')?.addEventListener('click', () => {
+      (dd.dataset.dd === 'cat' ? state.cats : state.prices).clear();
+      state.page = 1; apply();
+    });
+    dd.querySelector('[data-done]')?.addEventListener('click', () => close(true));
+    dd.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && openDd) { e.preventDefault(); close(true); }
+      // Arrow keys move between options (radios do this natively; make checkboxes match).
+      if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && openDd === dd && (e.target as HTMLElement).matches('input[type="checkbox"]')) {
+        e.preventDefault();
+        const opts = [...dd.querySelectorAll<HTMLInputElement>('li:not([hidden]) input')];
+        const i = opts.indexOf(e.target as HTMLInputElement);
+        opts[(i + (e.key === 'ArrowDown' ? 1 : -1) + opts.length) % opts.length]?.focus();
+      }
+    });
+  });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && openDd) close(true); });
+  document.addEventListener('pointerdown', (e) => { if (openDd && !openDd.contains(e.target as Node)) close(); });
+  backdrop.addEventListener('click', () => close());
+  // Close a desktop popover when focus leaves it.
+  document.addEventListener('focusin', (e) => { if (openDd && !isSheet() && !openDd.contains(e.target as Node)) close(); });
+
+  document.addEventListener('change', (e) => {
+    const i = e.target as HTMLInputElement;
+    if (i.name === 'cat') { i.checked ? state.cats.add(i.value) : state.cats.delete(i.value); }
+    else if (i.name === 'price') { i.checked ? state.prices.add(i.value) : state.prices.delete(i.value); }
+    else if (i.name === 'sort') { state.sort = i.value; if (!isSheet()) setTimeout(() => close(true), 120); }
+    else return;
+    state.page = 1;
+    apply();
+  });
+  const clearAll = () => { state.cats.clear(); state.prices.clear(); state.page = 1; apply(); };
+  clearAllBtn.addEventListener('click', clearAll);
+  document.querySelector('[data-clear-all]')?.addEventListener('click', clearAll);
+
+  pager.addEventListener('click', (e) => {
+    const a = (e.target as HTMLElement).closest<HTMLAnchorElement>('a[data-page]');
+    if (!a) return;
+    e.preventDefault();
+    state.page = Number(a.dataset.page);
+    apply();
+    grid.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  });
+
+  readUrl();
+  apply();
+
+  // Live price/status/hidden + popularity, then re-render once.
+  const views$ = fetch('/api/views').then((r) => (r.ok ? r.json() : {})).catch(() => ({}));
+  const live$ = fetchLive().catch(() => null);
+  // Interest counts ("N interested" on each card; hidden at 0, CSS hides it on sold cards).
+  fetch('/api/interest').then((r) => (r.ok ? r.json() : {})).catch(() => ({})).then((counts: Record<string, number>) => {
+    cards.forEach((c) => {
+      const n = Number(counts?.[c.dataset.slug!] ?? 0);
+      const el = c.querySelector<HTMLElement>('[data-interest]');
+      if (!el) return;
+      el.textContent = `${n} interested`;
+      el.hidden = !(n > 0);
+    });
+  });
+  Promise.all([views$, live$]).then(([v, list]) => {
+    views = (v && typeof v === 'object' ? v : {}) as Record<string, number>;
+    if (list) {
+      const bySlug = new Map(list.map((i) => [i.slug, i]));
+      cards.forEach((c) => { const i = bySlug.get(c.dataset.slug!); if (i) patchCard(c, i); });
+    }
+    apply();
+  });
+</script>

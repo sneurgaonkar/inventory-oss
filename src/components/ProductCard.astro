@@ -1,0 +1,133 @@
+---
+import { imgBox, srcsetBox, formatPrice, STATUS_LABEL, type Product } from '../lib/sanity';
+interface Props { product: Product; hidden?: boolean; eager?: boolean }
+const { product: p, hidden = false, eager = false } = Astro.props;
+const unavailable = p.status !== 'available';
+const sold = p.status === 'sold' || p.status === 'given';
+const onhold = p.status === 'reserved';
+const first = p.images?.[0];
+const hasVideo = (p.videos?.length ?? 0) > 0;
+const WIDTHS = [240, 360, 480, 640, 800];
+---
+<a
+  href={`/items/${p.slug}/`}
+  class:list={['card', { unavailable, sold, onhold }]}
+  data-slug={p.slug}
+  data-category={p.category?.slug}
+  data-status={p.status}
+  data-price={p.askingPrice}
+  data-featured={p.featured ? '1' : ''}
+  data-created={p._createdAt}
+  hidden={hidden}
+>
+  <div class="card-media">
+    {first && (
+      <img
+        src={imgBox(first, 480)}
+        srcset={srcsetBox(first, WIDTHS)}
+        sizes="(max-width: 768px) 46vw, (max-width: 1200px) 31vw, 24vw"
+        width="480"
+        height="480"
+        alt={p.title}
+        loading={eager ? 'eager' : 'lazy'}
+        fetchpriority={eager ? 'high' : 'auto'}
+        decoding="async"
+      />
+    )}
+    <div class="card-tags">
+      <span class={`status-badge ${p.status}`} data-badge hidden={!unavailable}>{STATUS_LABEL[p.status]}</span>
+      {p.condition && !sold && (
+        <span class:list={['condition-tag', { sealed: p.condition.startsWith('Unopened') }]}>{p.condition}</span>
+      )}
+    </div>
+    {hasVideo && (
+      <span class="video-badge" title="Has a video">
+        <svg viewBox="0 0 24 24" width="10" height="10" fill="currentColor" aria-hidden="true"><path d="M8 5.5v13l11-6.5z" /></svg>
+        <span class="sr-only">Has a video</span>
+      </span>
+    )}
+  </div>
+  <div class="card-info">
+    <span class="card-name">{p.title}</span>
+    <span class="card-price">
+      <span class="price-main" data-asking>{formatPrice(p.askingPrice)}</span>
+      {p.purchasePrice ? <s class="price-was"><span class="sr-only">Originally </span>{formatPrice(p.purchasePrice)}</s> : null}
+    </span>
+    {/* Filled in client-side from /api/interest; stays hidden at 0 and on sold cards. */}
+    <span class="card-interest" data-interest hidden></span>
+  </div>
+</a>
+
+<style>
+  .card {
+    display: flex; flex-direction: column; text-decoration: none; color: inherit;
+    background: var(--card); border-radius: 2px; overflow: hidden;
+    box-shadow: 0 1px 3px var(--shadow);
+    transition: box-shadow 0.3s ease, transform 0.3s ease;
+    animation: card-in 0.45s var(--ease) both;
+  }
+  .card[hidden] { display: none; }
+  .card:hover { box-shadow: 0 12px 40px rgba(0, 0, 0, 0.12); }
+  .card:focus-visible { outline-offset: 4px; }
+  .card-media { position: relative; aspect-ratio: 1; background: var(--card); overflow: hidden; }
+  .card-media img {
+    position: absolute; inset: 6%; width: 88%; height: 88%; object-fit: contain;
+    transition: transform 0.4s ease, opacity 0.3s ease, filter 0.3s ease;
+  }
+  .card:hover .card-media img { transform: scale(1.03); }
+  .card-tags {
+    position: absolute; top: 12px; left: 12px; right: 44px; z-index: 1;
+    display: flex; flex-direction: column; align-items: flex-start; gap: 6px; pointer-events: none;
+  }
+  .card-tags .status-badge[hidden] { display: none; }
+  .condition-tag {
+    display: inline-flex; align-items: center; padding: 3px 8px; border-radius: 999px;
+    font-size: 11px; font-weight: 500; line-height: 1.3; letter-spacing: 0.01em; white-space: nowrap;
+    background: rgba(255, 255, 255, 0.92); color: var(--fg-2, #444);
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08);
+  }
+  .condition-tag.sealed { background: #e7f4ea; color: #1f6b35; box-shadow: 0 0 0 1px rgba(31, 107, 53, 0.18); }
+  .video-badge {
+    position: absolute; top: 12px; right: 12px; width: 24px; height: 24px; border-radius: 50%;
+    display: inline-flex; align-items: center; justify-content: center; padding-left: 2px;
+    background: rgba(0, 0, 0, 0.55); color: #fff; pointer-events: none;
+  }
+  .card.sold .video-badge { display: none; }
+  .card.unavailable .card-media img { opacity: 0.45; filter: grayscale(0.6); }
+  .card-info { display: flex; flex-direction: column; gap: 4px; padding: 12px 14px 14px; }
+  .card-name {
+    font-size: calc(0.85rem + 1px); font-weight: 500; line-height: 1.35; letter-spacing: -0.01em; color: var(--fg);
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .card-price { display: flex; align-items: baseline; flex-wrap: wrap; gap: 0 6px; font-size: 0.75rem; line-height: 1.6; }
+  .price-main { font-size: 0.85rem; font-weight: 600; color: var(--fg); }
+  .price-was { font-size: 12px; font-weight: 500; color: var(--muted); text-decoration-thickness: 1px; }
+  .card.unavailable .price-main { color: var(--muted); }
+  .card-interest { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 500; line-height: 1.4; color: var(--fg-2); }
+  .card-interest[hidden], .card.sold .card-interest { display: none; }
+  .card-interest::before {
+    content: ''; width: 12px; height: 12px; flex-shrink: 0; background: currentColor; opacity: 0.7;
+    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linejoin='round'%3E%3Cpath d='M12 20s-7-4.35-7-10a4 4 0 0 1 7-2.65A4 4 0 0 1 19 10c0 5.65-7 10-7 10Z'/%3E%3C/svg%3E") center / contain no-repeat;
+            mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linejoin='round'%3E%3Cpath d='M12 20s-7-4.35-7-10a4 4 0 0 1 7-2.65A4 4 0 0 1 19 10c0 5.65-7 10-7 10Z'/%3E%3C/svg%3E") center / contain no-repeat;
+  }
+  /* sold cards (shown in the Sold section on the homepage) */
+  .card.sold { background: transparent; box-shadow: none; }
+  .card.sold:hover { box-shadow: 0 1px 3px var(--shadow); }
+  .card.sold .card-media { background: var(--mat); }
+  .card.sold .card-media img { opacity: 0.55; filter: grayscale(1); mix-blend-mode: multiply; }
+  .card.sold:hover .card-media img { transform: none; }
+  .card.sold .card-name { color: var(--fg-2); }
+  /* on-hold cards (homepage On hold section): lighter than sold, still in colour */
+  .card.onhold .card-media img { opacity: 0.8; filter: grayscale(0.2); }
+  .card.onhold .price-main { color: var(--fg-2); }
+  @media (max-width: 768px) {
+    .card-info { padding: 10px 12px 12px; }
+    .card-name { font-size: 0.8rem; }
+    .price-main { font-size: 0.8rem; }
+    .price-was { font-size: 11px; }
+    .card-tags { top: 8px; left: 8px; right: 36px; gap: 4px; }
+    .condition-tag { font-size: 10px; padding: 2px 7px; }
+    .video-badge { top: 8px; right: 8px; width: 22px; height: 22px; }
+  }
+  @keyframes card-in { from { opacity: 0; transform: translateY(10px); } }
+</style>

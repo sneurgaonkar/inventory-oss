@@ -1,0 +1,44 @@
+{
+  "name": "inventory-oss",
+  "type": "module",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Open-source moving / garage sale site — Astro + Sanity + Cloudflare Workers",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "astro": "astro",
+    "deploy": "astro build && wrangler deploy",
+    "preview:cf": "astro build && wrangler dev",
+    "seed": "node scripts/seed.mjs",
+    "create-item": "node scripts/create-item.mjs"
+  },
+  "dependencies": {
+    "@astrojs/react": "^6.0.4",
+    "@sanity/astro": "^3.5.1",
+    "@sanity/image-url": "^2.1.1",
+    "@sanity/vision": "^6.11.0",
+    "astro": "^7.2.9",
+    "astro-portabletext": "^1.0.0",
+    "groq": "^6.11.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "sanity": "^6.11.0"
+  },
+  "allowScripts": {
+    "esbuild": true,
+    "workerd@1.20261023.1": true
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.10",
+    "@cloudflare/workers-types": "^5.20260830.1",
+    "@types/node": "^26.4.0",
+    "typescript": "^6.0.3",
+    "wrangler": "^4.127.1"
+  }
+}

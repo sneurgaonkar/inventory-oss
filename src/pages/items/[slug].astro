@@ -1,0 +1,355 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import InterestedButton from '../../components/InterestedButton';
+import { renderDescription, plainDescription } from '../../lib/markdown';
+import { getProduct, getSiteSettings, imgBox, srcsetBox, formatPrice, formatDate, STATUS_LABEL } from '../../lib/sanity';
+
+export async function getStaticPaths() {
+  const { getProducts } = await import('../../lib/sanity');
+  const products = await getProducts();
+  return products.map((p) => ({ params: { slug: p.slug } }));
+}
+
+const { slug } = Astro.params;
+const [p, settings] = await Promise.all([getProduct(slug!), getSiteSettings()]);
+if (!p) return Astro.redirect('/');
+const unavailable = p.status !== 'available';
+const isSold = p.status === 'sold';
+const isHeld = p.status === 'reserved';
+// On-hold items can still be shortlisted (as a backup if the hold falls through).
+const canShortlist = !unavailable || isHeld;
+const images = p.images ?? [];
+const videos = p.videos ?? [];
+const total = images.length + videos.length;
+const many = total > 1;
+const WIDTHS = [480, 720, 960, 1200, 1600];
+const SIZES = '(max-width: 900px) 100vw, (max-width: 1400px) 52vw, 720px';
+const bought = formatDate(p.purchaseDate);
+const host = (() => { try { return p.sourceUrl ? new URL(p.sourceUrl).hostname.replace(/^www\./, '') : ''; } catch { return ''; } })();
+---
+<Layout title={p.title} description={plainDescription(p.description) || undefined}>
+  <div class="item-wrap">
+    <nav class="crumbs" aria-label="Breadcrumb">
+      <a href="/" class="back">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>
+        All objects
+      </a>
+      {p.category && <><span class="sep" aria-hidden="true">/</span><a href={`/?cat=${p.category.slug}`}>{p.category.title}</a></>}
+    </nav>
+
+    <article class:list={['item-panel', { 'is-sold': isSold, 'is-held': isHeld }]} id="item-panel">
+      <section class="gallery" aria-label={`${p.title} photos`}>
+        <div class="viewer" id="viewer" tabindex={many ? 0 : undefined} aria-roledescription={many ? 'carousel' : undefined}>
+          {images.map((img, i) => (
+            <figure class="slide" id={`photo-${i + 1}`} aria-label={many ? `Photo ${i + 1} of ${total}` : undefined}>
+              <img
+                src={imgBox(img, 1200)}
+                srcset={srcsetBox(img, WIDTHS)}
+                sizes={SIZES}
+                width="1200"
+                height="1200"
+                alt={many ? `${p.title}, photo ${i + 1} of ${total}` : p.title}
+                loading={i === 0 ? 'eager' : 'lazy'}
+                fetchpriority={i === 0 ? 'high' : 'auto'}
+                decoding="async"
+              />
+            </figure>
+          ))}
+          {videos.map((v, j) => (
+            <figure class="slide video-slide" id={`photo-${images.length + j + 1}`} aria-label={many ? `Video ${j + 1} of ${videos.length}` : undefined}>
+              <video
+                controls
+                muted
+                playsinline
+                preload="metadata"
+                poster={v.poster ? imgBox(v.poster, 1200) : undefined}
+                aria-label={`${p.title}, video${videos.length > 1 ? ` ${j + 1}` : ''}`}
+              >
+                <source src={v.url} type={v.mimeType || 'video/mp4'} />
+              </video>
+            </figure>
+          ))}
+          <span data-live-badge class={`status-badge ${p.status}`} hidden={!unavailable}>{STATUS_LABEL[p.status]}</span>
+        </div>
+        {many && (
+          <>
+            <button class="nav-arrow prev" type="button" data-step="-1" aria-label="Previous photo" aria-controls="viewer">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>
+            </button>
+            <button class="nav-arrow next" type="button" data-step="1" aria-label="Next photo" aria-controls="viewer">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6" /></svg>
+            </button>
+            <span class="counter" id="counter" aria-hidden="true">1 / {total}</span>
+          </>
+        )}
+        {many && (
+          <div class="thumbs" role="group" aria-label="Choose photo">
+            {images.map((img, i) => (
+              <a href={`#photo-${i + 1}`} class:list={['thumb', { active: i === 0 }]} data-index={i} aria-label={`Show photo ${i + 1}`} aria-current={i === 0 ? 'true' : undefined}>
+                <img src={imgBox(img, 160)} srcset={`${imgBox(img, 160)} 1x, ${imgBox(img, 320)} 2x`} width="160" height="160" alt="" loading="lazy" decoding="async" />
+              </a>
+            ))}
+            {videos.map((v, j) => (
+              <a href={`#photo-${images.length + j + 1}`} class="thumb thumb-video" data-index={images.length + j} aria-label={`Play video ${j + 1}`}>
+                {v.poster ? <img src={imgBox(v.poster, 160)} srcset={`${imgBox(v.poster, 160)} 1x, ${imgBox(v.poster, 320)} 2x`} width="160" height="160" alt="" loading="lazy" decoding="async" /> : null}
+                <span class="play-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><path d="M8 5.5v13l11-6.5z" /></svg></span>
+              </a>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section class="details">
+        <div class="sold-banner" data-sold-banner role="status" hidden={!isSold}>
+          <span class="sold-dot" aria-hidden="true"></span>
+          <span><strong>Sold</strong> · This one has found a new home.</span>
+        </div>
+        <div class="hold-banner" data-hold-banner role="status" hidden={!isHeld}>
+          <span class="hold-dot" aria-hidden="true"></span>
+          <span><strong>On hold</strong> · Someone has first dibs on this right now.</span>
+        </div>
+        <span class="meta">{[p.category?.title, bought && `Bought ${bought}`].filter(Boolean).join(' • ')}</span>
+        <h1 class="title">{p.title}</h1>
+        <div class="tags" hidden={!p.condition && !bought}>
+          {p.condition && <span class="tag"><span class="tag-k">Condition</span>{p.condition}</span>}
+          {bought && <span class="tag"><span class="tag-k">Bought</span>{bought}</span>}
+        </div>
+
+        <hr class="divider" />
+
+        {p.description && <div class="desc" set:html={renderDescription(p.description)} />}
+
+        <div class="price-row">
+          <div class="price">
+            <span class="price-main" data-asking>{formatPrice(p.askingPrice)}</span>
+            {p.purchasePrice ? <s class="price-was"><span class="sr-only">Originally </span>{formatPrice(p.purchasePrice)}</s> : null}
+          </div>
+          {p.sourceUrl && (
+            <a class="product-link" href={p.sourceUrl} target="_blank" rel="noreferrer noopener">
+              View original listing{host && <span class="host">{host}</span>}
+              <span class="link-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7M8 7h9v9" /></svg>
+              </span>
+              <span class="sr-only">(opens in a new tab)</span>
+            </a>
+          )}
+        </div>
+
+        <div class="cta" data-item={p.slug}>
+          <p class="gone" data-when-unavailable hidden={canShortlist || isSold}>This one's gone, sorry!</p>
+          <div data-when-available hidden={!canShortlist}>
+            <InterestedButton client:load item={{ slug: p.slug, title: p.title, price: p.askingPrice }} />
+          </div>
+          <p class="hint" data-when-open hidden={unavailable}>Adds it to your shortlist. Send me your details from the Shortlist button at the top.</p>
+          <p class="hint" data-when-held hidden={!isHeld}>Shortlist it as a backup and send me your details from the Shortlist button. I'll let you know if it frees up.</p>
+        </div>
+        <p class="pickup">{settings.pickupNote}</p>
+      </section>
+    </article>
+  </div>
+</Layout>
+
+<script>
+  import { fetchLive, fmt, STATUS_LABEL } from '../../lib/live-client';
+
+  // Gallery: scroll-snap carousel + arrows + thumbnails (works without JS via swipe and #photo-N anchors).
+  const viewer = document.getElementById('viewer');
+  const thumbs = [...document.querySelectorAll<HTMLAnchorElement>('.thumb')];
+  const counter = document.getElementById('counter');
+  const slides = viewer ? [...viewer.querySelectorAll<HTMLElement>('.slide')] : [];
+  const current = () => (viewer ? Math.round(viewer.scrollLeft / Math.max(1, viewer.clientWidth)) : 0);
+  const go = (i: number) => {
+    if (!viewer || !slides.length) return;
+    const n = (i + slides.length) % slides.length;
+    viewer.scrollTo({ left: n * viewer.clientWidth, behavior: 'smooth' });
+  };
+  const sync = () => {
+    const i = current();
+    thumbs.forEach((t, k) => { t.classList.toggle('active', k === i); if (k === i) t.setAttribute('aria-current', 'true'); else t.removeAttribute('aria-current'); });
+    if (counter) counter.textContent = `${i + 1} / ${slides.length}`;
+    // Pause any video that has been swiped out of view.
+    slides.forEach((s, k) => { if (k !== i) s.querySelector('video')?.pause(); });
+  };
+  if (viewer && slides.length > 1) {
+    let t: number | undefined;
+    viewer.addEventListener('scroll', () => { clearTimeout(t); t = window.setTimeout(sync, 60); }, { passive: true });
+    document.querySelectorAll<HTMLButtonElement>('.nav-arrow').forEach((b) => b.addEventListener('click', () => go(current() + Number(b.dataset.step))));
+    thumbs.forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); go(Number(a.dataset.index)); }));
+    viewer.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowRight') { e.preventDefault(); go(current() + 1); }
+      if (e.key === 'ArrowLeft') { e.preventDefault(); go(current() - 1); }
+    });
+  }
+
+  // Popularity: one unique view per browser per item, sent after the page has fully loaded.
+  // The worker also dedupes by IP and ignores bots/prefetches; counts are never shown publicly.
+  const viewSlug = document.querySelector<HTMLElement>('[data-item]')?.dataset.item;
+  const sendView = () => {
+    if (!viewSlug || (navigator as any).webdriver) return;
+    const key = `viewed:${viewSlug}`;
+    try { if (localStorage.getItem(key)) return; } catch { return; }
+    fetch(`/api/view/${viewSlug}`, { method: 'POST', keepalive: true })
+      .then((r) => { if (r.ok) try { localStorage.setItem(key, String(Date.now())); } catch {} })
+      .catch(() => {});
+  };
+  if (document.readyState === 'complete') sendView(); else window.addEventListener('load', sendView, { once: true });
+
+  // Live price / status / hidden from Sanity's CDN.
+  const cta = document.querySelector<HTMLElement>('[data-item]');
+  const slug = cta?.dataset.item;
+  fetchLive()
+    .then((list) => {
+      const info = list.find((i) => i.slug === slug);
+      if (!info || !cta) return;
+      const unavailable = info.status !== 'available' || !!info.hidden;
+      const asking = document.querySelector('[data-asking]');
+      if (asking) asking.textContent = fmt(info.askingPrice);
+      const badge = document.querySelector<HTMLElement>('[data-live-badge]');
+      if (badge) {
+        badge.hidden = info.status === 'available';
+        badge.className = `status-badge ${info.status}`;
+        badge.textContent = STATUS_LABEL[info.status];
+      }
+      const sold = info.status === 'sold';
+      const held = info.status === 'reserved' && !info.hidden;
+      const canShortlist = !unavailable || held;
+      const panel = document.getElementById('item-panel');
+      panel?.classList.toggle('is-sold', sold);
+      panel?.classList.toggle('is-held', held);
+      const banner = document.querySelector<HTMLElement>('[data-sold-banner]');
+      if (banner) banner.hidden = !sold;
+      const holdBanner = document.querySelector<HTMLElement>('[data-hold-banner]');
+      if (holdBanner) holdBanner.hidden = !held;
+      cta.querySelectorAll<HTMLElement>('[data-when-unavailable]').forEach((el) => (el.hidden = canShortlist || sold));
+      cta.querySelectorAll<HTMLElement>('[data-when-available]').forEach((el) => (el.hidden = !canShortlist));
+      cta.querySelectorAll<HTMLElement>('[data-when-open]').forEach((el) => (el.hidden = unavailable));
+      cta.querySelectorAll<HTMLElement>('[data-when-held]').forEach((el) => (el.hidden = !held));
+    })
+    .catch(() => {});
+</script>
+
+<style>
+  .item-wrap { max-width: 1320px; margin: 0 auto; padding: 24px var(--pad-x) 40px; }
+  .crumbs { display: flex; align-items: center; gap: 10px; margin-bottom: 20px; font-size: 12px; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+  .crumbs a { text-decoration: none; transition: color 0.2s ease; }
+  .crumbs a:hover { color: var(--fg); }
+  .back { display: inline-flex; align-items: center; gap: 4px; color: var(--fg-2); }
+  .sep { color: var(--line); }
+
+  .item-panel {
+    display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    background: var(--card); border-radius: 2px; box-shadow: 0 1px 3px var(--shadow), 0 12px 40px rgba(0, 0, 0, 0.05);
+    overflow: hidden; animation: panel-in 0.6s var(--ease) both;
+  }
+
+  /* gallery */
+  .gallery { position: relative; background: var(--mat); display: flex; flex-direction: column; min-width: 0; }
+  .viewer {
+    position: relative; display: flex; overflow-x: auto; scroll-snap-type: x mandatory; scroll-behavior: smooth;
+    scrollbar-width: none; aspect-ratio: 1; outline-offset: -3px;
+  }
+  .viewer::-webkit-scrollbar { display: none; }
+  .slide { flex: 0 0 100%; margin: 0; scroll-snap-align: start; position: relative; aspect-ratio: 1; }
+  .slide img { position: absolute; inset: 7%; width: 86%; height: 86%; object-fit: contain; mix-blend-mode: multiply; }
+  .video-slide { background: #111; }
+  .video-slide video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #111; }
+  .item-panel.is-sold .video-slide video { filter: grayscale(1); }
+  .thumb-video { position: relative; background: #111; }
+  .thumb-video .play-icon {
+    position: absolute; inset: 0; margin: auto; width: 26px; height: 26px; border-radius: 50%;
+    display: inline-flex; align-items: center; justify-content: center; background: rgba(0, 0, 0, 0.6); color: #fff;
+  }
+  .thumb-video .play-icon svg { margin-left: 2px; }
+  .viewer .status-badge { position: absolute; top: 16px; left: 16px; z-index: 2; }
+  .nav-arrow {
+    position: absolute; top: calc(50% - 21px); z-index: 3; width: 42px; height: 42px; border-radius: 999px; border: 0;
+    display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
+    background: rgba(0, 0, 0, 0.55); color: #fff; opacity: 0; transition: opacity 0.25s ease, background-color 0.2s ease, transform 0.2s ease;
+  }
+  .gallery:hover .nav-arrow, .nav-arrow:focus-visible { opacity: 1; }
+  .nav-arrow:hover { background: rgba(0, 0, 0, 0.75); }
+  .nav-arrow.prev { left: 16px; } .nav-arrow.next { right: 16px; }
+  .counter {
+    position: absolute; top: 16px; right: 16px; z-index: 2; padding: 5px 10px; border-radius: 100px;
+    background: rgba(255, 255, 255, 0.9); font-size: 11px; font-weight: 600; letter-spacing: 0.06em; color: var(--fg-2);
+  }
+  .thumbs { display: flex; gap: 8px; padding: 0 20px 20px; overflow-x: auto; scrollbar-width: none; }
+  .thumbs::-webkit-scrollbar { display: none; }
+  .thumb {
+    flex: 0 0 64px; height: 64px; border-radius: 4px; background: var(--card); padding: 6px; display: block;
+    border: 1px solid transparent; opacity: 0.6; transition: opacity 0.2s ease, border-color 0.2s ease;
+  }
+  .thumb img { width: 100%; height: 100%; object-fit: contain; }
+  .thumb:hover { opacity: 1; }
+  .thumb.active { opacity: 1; border-color: var(--fg); }
+  @media (hover: none) { .nav-arrow { opacity: 1; background: rgba(0, 0, 0, 0.45); width: 36px; height: 36px; top: calc(50% - 18px); } }
+
+  /* details */
+  .details { padding: 40px 44px; display: flex; flex-direction: column; min-width: 0; }
+  .meta { font-size: 13px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
+  .title { font-family: var(--font-body); font-size: 30px; line-height: 1.2; font-weight: 600; letter-spacing: -0.02em; margin: 10px 0 16px; color: var(--fg); text-wrap: balance; }
+  .tags { display: flex; flex-wrap: wrap; gap: 8px; }
+  .tag {
+    display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px; border-radius: 8px;
+    background: rgba(211, 197, 178, 0.14); border: 1px solid rgba(160, 140, 110, 0.18);
+    font-size: 12px; font-weight: 500; letter-spacing: 0.02em; color: var(--fg-2);
+  }
+  .tag-k { color: var(--muted); font-weight: 500; }
+  .divider { border: 0; border-top: 1px solid var(--line); margin: 28px 0 24px; width: 100%; }
+  .desc { margin: 0; font-size: 16px; line-height: 1.7; color: var(--fg-2); max-width: 62ch; }
+  .desc :global(p) { margin: 0 0 14px; }
+  .desc :global(ul), .desc :global(ol) { margin: 0 0 14px; padding-left: 1.25em; }
+  .desc :global(li) { margin: 0 0 6px; padding-left: 2px; }
+  .desc :global(li::marker) { color: var(--muted); }
+  .desc :global(strong) { color: var(--fg); font-weight: 600; }
+  .desc :global(em) { font-style: italic; }
+  .desc > :global(:last-child) { margin-bottom: 0; }
+  .price-row { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap-reverse; margin-top: 32px; padding-top: 24px; border-top: 1px solid var(--line); }
+  .price { display: flex; align-items: baseline; gap: 10px; }
+  .price-main { font-size: 26px; font-weight: 600; letter-spacing: -0.02em; color: var(--fg); }
+  .price-was { font-size: 15px; font-weight: 500; color: var(--muted); }
+  .product-link { display: inline-flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 500; color: var(--fg-2); text-decoration: none; transition: color 0.2s ease; }
+  .product-link .host { font-size: 12px; color: var(--muted); font-weight: 400; }
+  .product-link .host::before { content: '· '; }
+  .link-icon { width: 30px; height: 30px; border-radius: 50%; border: 1px solid var(--line); display: inline-flex; align-items: center; justify-content: center; transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease; }
+  .product-link:hover { color: var(--fg); }
+  .product-link:hover .link-icon { background: var(--fg); border-color: var(--fg); color: #fff; }
+  .cta { margin-top: 24px; display: flex; flex-direction: column; gap: 12px; }
+  .cta :global(.btn.interested) { width: 100%; min-height: 52px; font-size: 15px; }
+  .sold-banner {
+    display: flex; align-items: center; gap: 10px; margin: -4px 0 20px; padding: 12px 16px; border-radius: 10px;
+    background: var(--bg); border: 1px solid var(--line); font-size: 14px; line-height: 1.4; color: var(--fg-2);
+  }
+  .sold-banner[hidden] { display: none; }
+  .sold-banner strong { font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; font-size: 12px; color: var(--fg); }
+  .sold-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--danger); flex-shrink: 0; }
+  .hold-banner {
+    display: flex; align-items: center; gap: 10px; margin: -4px 0 20px; padding: 12px 16px; border-radius: 10px;
+    background: #fbf6ec; border: 1px solid #efe1c4; font-size: 14px; line-height: 1.4; color: var(--fg-2);
+  }
+  .hold-banner[hidden] { display: none; }
+  .hold-banner strong { font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; font-size: 12px; color: var(--fg); }
+  .hold-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--warn); flex-shrink: 0; }
+  .item-panel.is-held .slide img { opacity: 0.85; filter: grayscale(0.15); }
+  .item-panel.is-sold .slide img { filter: grayscale(1); opacity: 0.6; }
+  .item-panel.is-sold .price-main { color: var(--muted); }
+  .gone { margin: 0; padding: 16px; border-radius: 10px; background: var(--bg); text-align: center; color: var(--fg-2); font-weight: 500; }
+  .hint { margin: 0; font-size: 13px; line-height: 1.5; color: var(--muted); text-align: center; }
+  .pickup { margin: 24px 0 0; padding-top: 20px; border-top: 1px solid var(--line); font-size: 13px; line-height: 1.55; color: var(--muted); }
+
+  @media (max-width: 900px) {
+    .item-panel { grid-template-columns: 1fr; }
+    .details { padding: 28px 24px 32px; }
+    .title { font-size: 24px; }
+    .price-main { font-size: 22px; }
+  }
+  @media (max-width: 480px) {
+    .item-wrap { padding: 16px 0 24px; }
+    .crumbs { padding: 0 var(--pad-x); margin-bottom: 14px; }
+    .item-panel { border-radius: 0; box-shadow: none; }
+    .details { padding: 24px 20px 28px; }
+    .thumbs { padding: 0 16px 16px; }
+    .thumb { flex-basis: 56px; height: 56px; }
+  }
+  @keyframes panel-in { from { opacity: 0; transform: translateY(12px); } }
+</style>
